@@ -33,23 +33,23 @@ void setup() {
   Serial.begin(115200);  //Initialize our USB port which will always be redefined as SerialUSB to use the Native USB port tied directly to the SAM3X processor.
 
   // Initialize CAN ports
-  if (Can0.begin(can0Speed, 255)) //can1 external bus
-  {
-    Serial.println("Using CAN1 - initialization completed.\n");
-  }
-  else Serial.println("CAN1 initialization (sync) ERROR\n");
+  // if (Can0.begin(can0Speed, 255)) //can1 external bus
+  // {
+  //   Serial.println("Using CAN1 - initialization completed.\n");
+  // }
+  // else Serial.println("CAN1 initialization (sync) ERROR\n");
 
   int filter;
   //extended
-  for (filter = 0; filter < 3; filter++)
-  {
-    Can0.setRXFilter(filter, 0, 0, true);
-  }
-  //standard
-  for (int filter = 3; filter < 7; filter++)
-  {
-    Can0.setRXFilter(filter, 0, 0, false);
-  }
+  // for (filter = 0; filter < 3; filter++)
+  // {
+  //   Can0.setRXFilter(filter, 0, 0, true);
+  // }
+  // //standard
+  // for (int filter = 3; filter < 7; filter++)
+  // {
+  //   Can0.setRXFilter(filter, 0, 0, false);
+  // }
 
 }
 
@@ -58,11 +58,11 @@ void loop()
   // put your main code here, to run repeatedly:
   CAN_FRAME incoming;
 
-  if (Can0.available())
-  {
-    Can0.read(incoming);
-    candecode(incoming);
-  }
+  // if (Can0.available())
+  // {
+  //   Can0.read(incoming);
+  //   candecode(incoming);
+  // }
 
   if (tlast <  (millis() - 500)) // 2hz loop
   {
