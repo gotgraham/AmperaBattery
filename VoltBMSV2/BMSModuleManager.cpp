@@ -5,7 +5,7 @@
 
 extern EEPROMSettings settings;
 
-BMSModuleManager::BMSModuleManager()
+BMSModuleManager::BMSModuleManager(mcp2515_can * c)
 {
   for (int i = 1; i <= MAX_MODULE_ADDR; i++)
   {
@@ -17,6 +17,8 @@ BMSModuleManager::BMSModuleManager()
   lowestPackTemp = 200.0f;
   highestPackTemp = -100.0f;
   isFaulted = false;
+
+  can = c;
 }
 
 void BMSModuleManager::clearmodules()
@@ -149,8 +151,7 @@ void BMSModuleManager::balanceCells()
     SERIALCONSOLE.println(' ');
   }
 
-
- // Can0.write(msg);
+  can->sendMsgBuf(msg.id, CAN_STDID, msg.len, msg.buf);
 
   for (int c = 0; c < 8; c++)
   {
@@ -194,8 +195,7 @@ void BMSModuleManager::balanceCells()
     SERIALCONSOLE.println(' ');
   }
 
-
- // Can0.write(msg);
+  can->sendMsgBuf(msg.id, CAN_STDID, msg.len, msg.buf);
 }
 
 float BMSModuleManager::getLowCellVolt()
