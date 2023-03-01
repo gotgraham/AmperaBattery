@@ -2,12 +2,10 @@
 #include "config.h"
 #include "BMSModule.h"
 
-#include "mcp2515_can.h"
-
 class BMSModuleManager
 {
 public:
-  BMSModuleManager(mcp2515_can * can);
+  BMSModuleManager();
   int seriescells();
   void clearmodules();
   void decodecan(CAN_message_t &msg);
@@ -57,10 +55,6 @@ private:
   int numFoundModules; // The number of modules that seem to exist
   bool isFaulted;
   int spack;
-
-  mcp2515_can * can;
-
-  
   /*
       void sendBatterySummary();
       void sendModuleSummary(int module);

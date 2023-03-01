@@ -5,7 +5,7 @@
 
 extern EEPROMSettings settings;
 
-BMSModuleManager::BMSModuleManager(mcp2515_can * c)
+BMSModuleManager::BMSModuleManager()
 {
   for (int i = 1; i <= MAX_MODULE_ADDR; i++)
   {
@@ -17,8 +17,6 @@ BMSModuleManager::BMSModuleManager(mcp2515_can * c)
   lowestPackTemp = 200.0f;
   highestPackTemp = -100.0f;
   isFaulted = false;
-
-  can = c;
 }
 
 void BMSModuleManager::clearmodules()
@@ -138,20 +136,21 @@ void BMSModuleManager::balanceCells()
   msg.id = 0x300;
   msg.len = 8;
 
-//
-//  SERIALCONSOLE.print("   DEBUG Balance - ID:    ");
-//  SERIALCONSOLE.print(msg.id, HEX);
-//  SERIALCONSOLE.println("    ");
-//  for (byte i = 0; i < msg.len; i++)
-//  {
-//    SERIALCONSOLE.print("    pos: ");
-//    Serial.print(i);
-//    Serial.print("  -  ");
-//    SERIALCONSOLE.print(msg.buf[i], BIN);
-//    SERIALCONSOLE.println(' ');
-//  }
 
-  can->sendMsgBuf(msg.id, CAN_STDID, msg.len, msg.buf);
+  SERIALCONSOLE.print("   DEBUG Balance - ID:    ");
+  SERIALCONSOLE.print(msg.id, HEX);
+  SERIALCONSOLE.println("    ");
+  for (byte i = 0; i < msg.len; i++)
+  {
+    SERIALCONSOLE.print("    pos: ");
+    Serial.print(i);
+    Serial.print("  -  ");
+    SERIALCONSOLE.print(msg.buf[i], BIN);
+    SERIALCONSOLE.println(' ');
+  }
+
+
+ // Can0.write(msg);
 
   for (int c = 0; c < 8; c++)
   {
@@ -183,19 +182,20 @@ void BMSModuleManager::balanceCells()
   msg.len = 5;
 
 
-//  SERIALCONSOLE.print("   DEBUG Balance - ID:    ");
-//  SERIALCONSOLE.print(msg.id, HEX);
-//  SERIALCONSOLE.println("    ");
-//  for (byte i = 0; i < msg.len; i++)
-//  {
-//    SERIALCONSOLE.print("    pos: ");
-//    Serial.print(i);
-//    Serial.print("  -  ");
-//    SERIALCONSOLE.print(msg.buf[i], BIN);
-//    SERIALCONSOLE.println(' ');
-//  }
+  SERIALCONSOLE.print("   DEBUG Balance - ID:    ");
+  SERIALCONSOLE.print(msg.id, HEX);
+  SERIALCONSOLE.println("    ");
+  for (byte i = 0; i < msg.len; i++)
+  {
+    SERIALCONSOLE.print("    pos: ");
+    Serial.print(i);
+    Serial.print("  -  ");
+    SERIALCONSOLE.print(msg.buf[i], BIN);
+    SERIALCONSOLE.println(' ');
+  }
 
-  can->sendMsgBuf(msg.id, CAN_STDID, msg.len, msg.buf);
+
+ // Can0.write(msg);
 }
 
 float BMSModuleManager::getLowCellVolt()
@@ -253,6 +253,7 @@ void BMSModuleManager::setPstrings(int Pstrings)
 
 void BMSModuleManager::setSensors(int sensor, float Ignore)
 {
+
   for (int x = 1; x <= MAX_MODULE_ADDR; x++)
   {
     if (modules[x].isExisting())
@@ -554,83 +555,83 @@ void BMSModuleManager::printPackDetails(int digits, bool port)
         COV = modules[y].getCOVCells();
         CUV = modules[y].getCUVCells();
 
-        Serial2.print("Module #");
-        Serial2.print(y);
-        if (y < 10)
-          Serial2.print(" ");
-        Serial2.print("  ");
-        Serial2.print(modules[y].getModuleVoltage(), digits);
-        Serial2.print("V");
-        if (modules[y].getCellsUsed() > 12)
-        {
-          for (int i = 1; i < 12; i++)
-          {
-            if (cellNum < 10)
-              Serial2.print(" ");
-            Serial2.print("  Cell-");
-            Serial2.print(1 + cellNum++);
-            Serial2.print(": ");
-            Serial2.print(modules[y].getCellVoltage(i), digits);
-            Serial2.print("V");
-          }
-          if (modules[y].getCellsUsed() > 12 && modules[y].getCellsUsed() < 24)
-          {
-            for (int i = 13; i < modules[y].getCellsUsed() + 1; i++)
-            {
-              if (cellNum < 10)
-                Serial2.print(" ");
-              Serial2.print("  Cell-");
-              Serial2.print(1 + cellNum++);
-              Serial2.print(": ");
-              Serial2.print(modules[y].getCellVoltage(i), digits);
-              Serial2.print("V");
-            }
-          }
-          else
-          {
-            for (int i = 13; i < 24; i++)
-            {
-              if (cellNum < 10)
-                Serial2.print(" ");
-              Serial2.print("  Cell-");
-              Serial2.print(1 + cellNum++);
-              Serial2.print(": ");
-              Serial2.print(modules[y].getCellVoltage(i), digits);
-              Serial2.print("V");
-            }
-          }
-          Serial2.println("               ");
-          if (modules[y].getCellsUsed() > 25)
-          {
-            for (int i = 25; i < modules[y].getCellsUsed() + 1; i++)
-            {
-              if (cellNum < 10)
-                Serial2.print(" ");
-              Serial2.print("  Cell-");
-              Serial2.print(1 + cellNum++);
-              Serial2.print(": ");
-              Serial2.print(modules[y].getCellVoltage(i), digits);
-              Serial2.print("V");
-            }
-          }
-        }
-        else
-        {
-          for (int i = 1; i < modules[y].getCellsUsed() + 1; i++)
-          {
-            if (cellNum < 10)
-              Serial2.print(" ");
-            Serial2.print("  Cell-");
-            Serial2.print(1 + cellNum++);
-            Serial2.print(": ");
-            Serial2.print(modules[y].getCellVoltage(i), digits);
-            Serial2.print("V");
-          }
-        }
-        Serial2.println("               ");
-        Serial2.print(" Temp 1: ");
-        Serial2.print(modules[y].getTemperature(0));
-        Serial2.println("               ");
+//        Serial2.print("Module #");
+//        Serial2.print(y);
+//        if (y < 10)
+//          Serial2.print(" ");
+//        Serial2.print("  ");
+//        Serial2.print(modules[y].getModuleVoltage(), digits);
+//        Serial2.print("V");
+//        if (modules[y].getCellsUsed() > 12)
+//        {
+//          for (int i = 1; i < 12; i++)
+//          {
+//            if (cellNum < 10)
+//              Serial2.print(" ");
+//            Serial2.print("  Cell-");
+//            Serial2.print(1 + cellNum++);
+//            Serial2.print(": ");
+//            Serial2.print(modules[y].getCellVoltage(i), digits);
+//            Serial2.print("V");
+//          }
+//          if (modules[y].getCellsUsed() > 12 && modules[y].getCellsUsed() < 24)
+//          {
+//            for (int i = 13; i < modules[y].getCellsUsed() + 1; i++)
+//            {
+//              if (cellNum < 10)
+//                Serial2.print(" ");
+//              Serial2.print("  Cell-");
+//              Serial2.print(1 + cellNum++);
+//              Serial2.print(": ");
+//              Serial2.print(modules[y].getCellVoltage(i), digits);
+//              Serial2.print("V");
+//            }
+//          }
+//          else
+//          {
+//            for (int i = 13; i < 24; i++)
+//            {
+//              if (cellNum < 10)
+//                Serial2.print(" ");
+//              Serial2.print("  Cell-");
+//              Serial2.print(1 + cellNum++);
+//              Serial2.print(": ");
+//              Serial2.print(modules[y].getCellVoltage(i), digits);
+//              Serial2.print("V");
+//            }
+//          }
+//          Serial2.println("               ");
+//          if (modules[y].getCellsUsed() > 25)
+//          {
+//            for (int i = 25; i < modules[y].getCellsUsed() + 1; i++)
+//            {
+//              if (cellNum < 10)
+//                Serial2.print(" ");
+//              Serial2.print("  Cell-");
+//              Serial2.print(1 + cellNum++);
+//              Serial2.print(": ");
+//              Serial2.print(modules[y].getCellVoltage(i), digits);
+//              Serial2.print("V");
+//            }
+//          }
+//        }
+//        else
+//        {
+//          for (int i = 1; i < modules[y].getCellsUsed() + 1; i++)
+//          {
+//            if (cellNum < 10)
+//              Serial2.print(" ");
+//            Serial2.print("  Cell-");
+//            Serial2.print(1 + cellNum++);
+//            Serial2.print(": ");
+//            Serial2.print(modules[y].getCellVoltage(i), digits);
+//            Serial2.print("V");
+//          }
+//        }
+//        Serial2.println("               ");
+//        Serial2.print(" Temp 1: ");
+//        Serial2.print(modules[y].getTemperature(0));
+//        Serial2.println("               ");
       }
     }
   }

@@ -24,26 +24,22 @@
 #include "config.h"
 #include "SerialConsole.h"
 #include "Logger.h"
-#include <ADC.h> //https://github.com/pedvide/ADC
 #include <EEPROM.h>
-#include <FlexCAN.h> //https://github.com/collin80/FlexCAN_Library
 #include <SPI.h>
 #include <Filters.h>//https://github.com/JonHub/Filters
-#include "Serial_CAN_Module_TeensyS3.h" //https://github.com/tomdebree/Serial_CAN_Teensy
+#include "mcp2515_can.h"
 
-#define RESTART_ADDR       0xE000ED0C
-#define READ_RESTART()     (*(volatile uint32_t *)RESTART_ADDR)
-#define WRITE_RESTART(val) ((*(volatile uint32_t *)RESTART_ADDR) = (val))
-#define CPU_REBOOT WRITE_RESTART(0x5FA0004)
+#define CPU_REBOOT 0 // restartCpu();
 
-Serial_CAN can;
-BMSModuleManager bms;
+mcp2515_can CAN0(9);  // Set CS pin
+mcp2515_can CAN1(10); // Set CS pin
+
+BMSModuleManager bms(&CAN1);
 SerialConsole console;
 EEPROMSettings settings;
 
-
 /////Version Identifier/////////
-int firmver = 220307;
+int firmver = 220308;
 
 //Curent filter//
 float filterFrequency = 5.0 ;
@@ -52,22 +48,23 @@ FilterOnePole lowpassFilter( LOWPASS, filterFrequency );
 //Simple BMS V2 wiring//
 const int ACUR2 = A0; // current 1
 const int ACUR1 = A1; // current 2
-const int IN1 = 17; // input 1 - high active
-const int IN2 = 16; // input 2- high active
-const int IN3 = 18; // input 1 - high active
-const int IN4 = 19; // input 2- high active
-const int OUT1 = 11;// output 1 - high active
-const int OUT2 = 12;// output 1 - high active
-const int OUT3 = 20;// output 1 - high active
-const int OUT4 = 21;// output 1 - high active
-const int OUT5 = 22;// output 1 - high active
-const int OUT6 = 23;// output 1 - high active
-const int OUT7 = 5;// output 1 - high active
-const int OUT8 = 6;// output 1 - high active
+const int IN1 = 22; // input 1 - high active
+const int IN2 = 23; // input 2- high active
+const int IN3 = 24; // input 1 - high active
+const int IN4 = 25; // input 2- high active
+const int OUT1 = 30;// output 1 - high active
+const int OUT2 = 31;// output 1 - high active
+const int OUT3 = 32;// output 1 - high active
+const int OUT4 = 33;// output 1 - high active
+const int OUT5 = 34;// output 1 - high active
+const int OUT6 = 35;// output 1 - high active
+const int OUT7 = 36;// output 1 - high active
+const int OUT8 = 37;// output 1 - high active
 const int led = 13;
 const int BMBfault = 11;
 
 byte bmsstatus = 0;
+
 //bms status values
 #define Boot 0
 #define Ready 1
@@ -91,8 +88,8 @@ byte bmsstatus = 0;
 #define Elcon 4
 #define Victron 5
 #define Coda 6
-//
 
+//
 
 int Discharge;
 int ErrorReason = 0;
@@ -128,13 +125,7 @@ byte rxBuf[8];
 char msgString[128];                        // Array to store serial string
 uint32_t inbox;
 signed long CANmilliamps;
-
-
 int Charged = 0;
-
-//struct can_frame canMsg;
-//MCP2515 CAN1(10); //set CS pin for can controlelr
-
 
 //variables for current calulation
 int value;
@@ -155,8 +146,7 @@ int SOC = 100; //State of Charge
 int SOCset = 0;
 int SOCtest = 0;
 
-
-///charger variables
+//charger variables
 int maxac1 = 16; //Shore power 16A per charger
 int maxac2 = 10; //Generator Charging
 int chargerid1 = 0x618; //bulk chargers
@@ -191,8 +181,7 @@ int CSVdebug = 0;
 int menuload = 0;
 int debugdigits = 2; //amount of digits behind decimal for voltage reading
 
-
-ADC *adc = new ADC(); // adc object
+// ADC *adc = new ADC(); // adc object
 void loadSettings()
 {
   Logger::console(0, "Resetting to factory defaults");
@@ -217,20 +206,20 @@ void loadSettings()
   settings.balanceVoltage = 3.9f;
   settings.balanceHyst = 0.04f;
   settings.logLevel = 2;
-  settings.CAP = 100; //battery size in Ah
+  settings.CAP = 45; //battery size in Ah
   settings.Pstrings = 1; // strings in parallel used to divide voltage of pack
-  settings.Scells = 12;//Cells in series
+  settings.Scells = 96;  //Cells in series
   settings.StoreVsetpoint = 3.8; // V storage mode charge max
   settings.discurrentmax = 300; // max discharge current in 0.1A
   settings.DisTaper = 0.3f; //V offset to bring in discharge taper to Zero Amps at settings.DischVsetpoint
-  settings.chargecurrentmax = 300; //max charge current in 0.1A
+  settings.chargecurrentmax = 100; //max charge current in 0.1A
   settings.chargecurrentend = 50; //end charge current in 0.1A
   settings.socvolt[0] = 3100; //Voltage and SOC curve for voltage based SOC calc
   settings.socvolt[1] = 10; //Voltage and SOC curve for voltage based SOC calc
   settings.socvolt[2] = 4100; //Voltage and SOC curve for voltage based SOC calc
   settings.socvolt[3] = 90; //Voltage and SOC curve for voltage based SOC calc
   settings.invertcur = 0; //Invert current sensor direction
-  settings.cursens = 2;
+  settings.cursens = Canbus;
   settings.voltsoc = 0; //SOC purely voltage based
   settings.Pretime = 5000; //ms of precharge time
   settings.conthold = 50; //holding duty cycle for contactor 0-255
@@ -249,30 +238,35 @@ void loadSettings()
   settings.UnderDur = 5000; //ms of allowed undervoltage before throwing open stopping discharge.
   settings.CurDead = 5;// mV of dead band on current sensor
   settings.ChargerDirect = 1; //1 - charger is always connected to HV battery // 0 - Charger is behind the contactors
-  settings.disp = 1; // 1 - display is used 0 - mirror serial data onto serial bus
-  settings.SerialCan = 1; // 1- serial can adapter used 0- Not used
+  settings.disp = 0; // 1 - display is used 0 - mirror serial data onto serial bus
+  settings.SerialCan = 0; // 1- serial can adapter used 0- Not used
   settings.SerialCanSpeed = 500; //serial can adapter speed
   settings.DCDCreq = 140; //requested DCDC voltage output in 0.1V
   settings.SerialCanBaud = 19200;
 }
 
-
 CAN_message_t msg;
 CAN_message_t inMsg;
-CAN_filter_t filter;
+CAN_message_t inMsg1;
 
 uint32_t lastUpdate;
 
-
 void setup()
 {
-  delay(4000);  //just for easy debugging. It takes a few seconds for USB to come up properly on most OS's
-  //pinMode(ACUR1, INPUT);//Not required for Analogue Pins
-  //pinMode(ACUR2, INPUT);
-  pinMode(IN1, INPUT);
-  pinMode(IN2, INPUT);
-  pinMode(IN3, INPUT);
+  // delay(4000);  //just for easy debugging. It takes a few seconds for USB to come up properly on most OS's
+
+  pinMode(IN1, INPUT);  // KEY ON
+  digitalWrite(IN1, LOW); // Disable pull up
+
+  pinMode(IN2, INPUT);  // Charge Current Limit Hi/Lo
+  digitalWrite(IN2, LOW); // Disable pull up
+
+  pinMode(IN3, INPUT);  // Charge Enable
+  digitalWrite(IN3, LOW); // Disable pull up
+
   pinMode(IN4, INPUT);
+  digitalWrite(IN4, LOW); // Disable pull up
+
   pinMode(OUT1, OUTPUT); // drive contactor
   pinMode(OUT2, OUTPUT); // precharge
   pinMode(OUT3, OUTPUT); // charge relay
@@ -283,119 +277,49 @@ void setup()
   pinMode(OUT8, OUTPUT); // pwm driver output
   pinMode(led, OUTPUT);
 
-  analogWriteFrequency(OUT5, pwmfreq);
-  analogWriteFrequency(OUT6, pwmfreq);
-  analogWriteFrequency(OUT7, pwmfreq);
-  analogWriteFrequency(OUT8, pwmfreq);
-
-  Can0.begin(125000);
-
-  //set filters for standard
-  for (int i = 0; i < 8; i++)
-  {
-    Can0.getFilter(filter, i);
-    filter.flags.extended = 0;
-    Can0.setFilter(filter, i);
-  }
-  //set filters for extended
-  for (int i = 9; i < 13; i++)
-  {
-    Can0.getFilter(filter, i);
-    filter.flags.extended = 1;
-    Can0.setFilter(filter, i);
+  while (CAN_OK != CAN0.begin(CAN_125KBPS)) { // init can bus : baudrate = 125k BMS Slaves
+    SERIAL_PORT_MONITOR.println(F("CAN0 init fail, retry..."));
+    delay(100);
   }
 
-  //if using enable pins on a transceiver they need to be set on
-
-
-  adc->adc0->setAveraging(16); // set number of averages
-  adc->adc0->setResolution(16); // set bits of resolution
-  adc->adc0->setConversionSpeed(ADC_CONVERSION_SPEED::MED_SPEED);
-  adc->adc0->setSamplingSpeed(ADC_SAMPLING_SPEED::MED_SPEED);
-  adc->adc0->startContinuous(ACUR1);
-
+  while (CAN_OK != CAN1.begin(CAN_250KBPS)) { // init can bus : baudrate = 250k Charger / Current
+    SERIAL_PORT_MONITOR.println(F("CAN1 init fail, retry..."));
+    delay(100);
+  }
 
   SERIALCONSOLE.begin(115200);
   SERIALCONSOLE.println("Starting up!");
   SERIALCONSOLE.println("SimpBMS V2 Volt-Ampera");
 
   Serial2.begin(115200);
-
-
-  // Display reason the Teensy was last reset
-  Serial.println();
-  Serial.println("Reason for last Reset: ");
-
-  if (RCM_SRS1 & RCM_SRS1_SACKERR)   Serial.println("Stop Mode Acknowledge Error Reset");
-  if (RCM_SRS1 & RCM_SRS1_MDM_AP)    Serial.println("MDM-AP Reset");
-  if (RCM_SRS1 & RCM_SRS1_SW)        Serial.println("Software Reset");                   // reboot with SCB_AIRCR = 0x05FA0004
-  if (RCM_SRS1 & RCM_SRS1_LOCKUP)    Serial.println("Core Lockup Event Reset");
-  if (RCM_SRS0 & RCM_SRS0_POR)       Serial.println("Power-on Reset");                   // removed / applied power
-  if (RCM_SRS0 & RCM_SRS0_PIN)       Serial.println("External Pin Reset");               // Reboot with software download
-  if (RCM_SRS0 & RCM_SRS0_WDOG)      Serial.println("Watchdog(COP) Reset");              // WDT timed out
-  if (RCM_SRS0 & RCM_SRS0_LOC)       Serial.println("Loss of External Clock Reset");
-  if (RCM_SRS0 & RCM_SRS0_LOL)       Serial.println("Loss of Lock in PLL Reset");
-  if (RCM_SRS0 & RCM_SRS0_LVD)       Serial.println("Low-voltage Detect Reset");
-  Serial.println();
-  ///////////////////
-
-
-  // enable WDT
-  noInterrupts();                                         // don't allow interrupts while setting up WDOG
-  WDOG_UNLOCK = WDOG_UNLOCK_SEQ1;                         // unlock access to WDOG registers
-  WDOG_UNLOCK = WDOG_UNLOCK_SEQ2;
-  delayMicroseconds(1);                                   // Need to wait a bit..
-
-  WDOG_TOVALH = 0x1000;
-  WDOG_TOVALL = 0x0000;
-  WDOG_PRESC  = 0;
-  WDOG_STCTRLH |= WDOG_STCTRLH_ALLOWUPDATE |
-                  WDOG_STCTRLH_WDOGEN | WDOG_STCTRLH_WAITEN |
-                  WDOG_STCTRLH_STOPEN | WDOG_STCTRLH_CLKSRC;
-  interrupts();
-  /////////////////
-
-
-
-  //VE.begin(19200); //Victron VE direct bus
-
   SERIALCONSOLE.println("Started serial interface");
-
 
   EEPROM.get(0, settings);
   if (settings.version != EEPROM_VERSION)
   {
     loadSettings();
   }
-  canSerial.begin(settings.SerialCanBaud); //Expansion serial bus
   Logger::setLoglevel(Logger::Off); //Debug = 0, Info = 1, Warn = 2, Error = 3, Off = 4
 
   lastUpdate = 0;
 
-  digitalWrite(led, HIGH);
   bms.setPstrings(settings.Pstrings);
   bms.setSensors(settings.IgnoreTemp, settings.IgnoreVolt);
 
   ///precharge timer kickers
   Pretimer = millis();
   Pretimer1  = millis();
-
 }
 
 void loop()
 {
-  while (Can0.available())
-  {
-    canread();
-  }
+  while (bmsSlaveRead()) {};
+
+  while (chgCurrRead()) {};
 
   if (SERIALCONSOLE.available() > 0)
   {
     menu();
-  }
-  if (settings.SerialCan == 1)
-  {
-    SerialCanRecieve();
   }
 
   if (outputcheck != 1)
@@ -406,8 +330,6 @@ void loop()
       if (bmsstatus != Error)
       {
         contctrl = contctrl | 4; //turn on negative contactor
-
-
         if (digitalRead(IN1) == LOW)//Key OFF
         {
           if (storagemode == 1)
@@ -538,12 +460,12 @@ void loop()
       else
       {
         /*
-          digitalWrite(OUT2, HIGH);//trip breaker
+          // digitalWrite(OUT2, HIGH);//trip breaker
           Discharge = 0;
-          digitalWrite(OUT4, LOW);
-          digitalWrite(OUT3, LOW);//turn off charger
-          digitalWrite(OUT2, LOW);
-          digitalWrite(OUT1, LOW);//turn off discharge
+          // digitalWrite(OUT4, LOW);
+          // digitalWrite(OUT3, LOW);//turn off charger
+          // digitalWrite(OUT2, LOW);
+          // digitalWrite(OUT1, LOW);//turn off discharge
           contctrl = 0; //turn off out 5 and 6
         */
         if (SOCset == 1)
@@ -584,7 +506,7 @@ void loop()
           //accurlim = 0;
           if (bms.getHighCellVolt() > settings.balanceVoltage && bms.getHighCellVolt() > bms.getLowCellVolt() + settings.balanceHyst)
           {
-            //bms.balanceCells();
+            // bms.balanceCells();
             balancecells = 1;
           }
           else
@@ -608,7 +530,6 @@ void loop()
             bmsstatus = Precharge;
             Pretimer = millis();
           }
-
           break;
 
         case (Precharge):
@@ -774,10 +695,8 @@ void loop()
 
     updateSOC();
     currentlimit();
-
-    VEcan();
-
     sendcommand();
+
     if (cellspresent == 0 && SOCset == 1)
     {
       cellspresent = bms.seriescells();
@@ -785,11 +704,13 @@ void loop()
     }
     else
     {
-      if (cellspresent != bms.seriescells() || cellspresent != (settings.Scells * settings.Pstrings)) //detect a fault in cells detected
+      if (bms.seriescells() != (settings.Scells * settings.Pstrings)) //detect a fault in cells detected
       {
         SERIALCONSOLE.println("  ");
         SERIALCONSOLE.print("   !!! Series Cells Fault !!!");
         SERIALCONSOLE.println("  ");
+        SERIALCONSOLE.print(bms.seriescells());
+        SERIALCONSOLE.println((settings.Scells * settings.Pstrings));
         bmsstatus = Error;
         ErrorReason = 3;
       }
@@ -1093,95 +1014,95 @@ void printbmsstat()
 
 void getcurrent()
 {
-  if ( settings.cursens == Analoguedual || settings.cursens == Analoguesing)
-  {
-    if ( settings.cursens == Analoguedual)
-    {
-      if (currentact < settings.changecur && currentact > (settings.changecur * -1))
-      {
-        sensor = 1;
-        adc->adc0->startContinuous(ACUR1);
-      }
-      else
-      {
-        sensor = 2;
-        adc->adc0->startContinuous(ACUR2);
-      }
-    }
-    else
-    {
-      sensor = 1;
-      adc->adc0->startContinuous(ACUR1);
-    }
-    if (sensor == 1)
-    {
-      if (debugCur != 0)
-      {
-        SERIALCONSOLE.println();
-        if ( settings.cursens == Analoguedual)
-        {
-          SERIALCONSOLE.print("Low Range: ");
-        }
-        else
-        {
-          SERIALCONSOLE.print("Single In: ");
-        }
-        SERIALCONSOLE.print("Value ADC0: ");
-      }
-      value = (uint16_t)adc->adc0->analogReadContinuous(); // the unsigned is necessary for 16 bits, otherwise values larger than 3.3/2 V are negative!
-      if (debugCur != 0)
-      {
-        SERIALCONSOLE.print(value * 3300 / adc->adc0->getMaxValue()); //- settings.offset1)
-        SERIALCONSOLE.print(" ");
-        SERIALCONSOLE.print(settings.offset1);
-      }
-      RawCur = int16_t((value * 3300 / adc->adc0->getMaxValue()) - settings.offset1) / (settings.convlow * 0.0000066);
-
-      if (abs((int16_t(value * 3300 / adc->adc0->getMaxValue()) - settings.offset1)) <  settings.CurDead)
-      {
-        RawCur = 0;
-      }
-      if (debugCur != 0)
-      {
-        SERIALCONSOLE.print("  ");
-        SERIALCONSOLE.print(int16_t(value * 3300 / adc->adc0->getMaxValue()) - settings.offset1);
-        SERIALCONSOLE.print("  ");
-        SERIALCONSOLE.print(RawCur);
-        SERIALCONSOLE.print(" mA");
-        SERIALCONSOLE.print("  ");
-      }
-    }
-    else
-    {
-      if (debugCur != 0)
-      {
-        SERIALCONSOLE.println();
-        SERIALCONSOLE.print("High Range: ");
-        SERIALCONSOLE.print("Value ADC0: ");
-      }
-      value = (uint16_t)adc->adc0->analogReadContinuous(); // the unsigned is necessary for 16 bits, otherwise values larger than 3.3/2 V are negative!
-      if (debugCur != 0)
-      {
-        SERIALCONSOLE.print(value * 3300 / adc->adc0->getMaxValue() );//- settings.offset2)
-        SERIALCONSOLE.print("  ");
-        SERIALCONSOLE.print(settings.offset2);
-      }
-      RawCur = int16_t((value * 3300 / adc->adc0->getMaxValue()) - settings.offset2) / (settings.convhigh *  0.0000066);
-      if (value < 100 || value > (adc->adc0->getMaxValue() - 100))
-      {
-        RawCur = 0;
-      }
-      if (debugCur != 0)
-      {
-        SERIALCONSOLE.print("  ");
-        SERIALCONSOLE.print((float(value * 3300 / adc->adc0->getMaxValue()) - settings.offset2));
-        SERIALCONSOLE.print("  ");
-        SERIALCONSOLE.print(RawCur);
-        SERIALCONSOLE.print("mA");
-        SERIALCONSOLE.print("  ");
-      }
-    }
-  }
+//  if ( settings.cursens == Analoguedual || settings.cursens == Analoguesing)
+//  {
+//    if ( settings.cursens == Analoguedual)
+//    {
+//      if (currentact < settings.changecur && currentact > (settings.changecur * -1))
+//      {
+//        sensor = 1;
+//        adc->adc0->startContinuous(ACUR1);
+//      }
+//      else
+//      {
+//        sensor = 2;
+//        adc->adc0->startContinuous(ACUR2);
+//      }
+//    }
+//    else
+//    {
+//      sensor = 1;
+//      adc->adc0->startContinuous(ACUR1);
+//    }
+//    if (sensor == 1)
+//    {
+//      if (debugCur != 0)
+//      {
+//        SERIALCONSOLE.println();
+//        if ( settings.cursens == Analoguedual)
+//        {
+//          SERIALCONSOLE.print("Low Range: ");
+//        }
+//        else
+//        {
+//          SERIALCONSOLE.print("Single In: ");
+//        }
+//        SERIALCONSOLE.print("Value ADC0: ");
+//      }
+//      value = (uint16_t)adc->adc0->analogReadContinuous(); // the unsigned is necessary for 16 bits, otherwise values larger than 3.3/2 V are negative!
+//      if (debugCur != 0)
+//      {
+//        SERIALCONSOLE.print(value * 3300 / adc->adc0->getMaxValue()); //- settings.offset1)
+//        SERIALCONSOLE.print(" ");
+//        SERIALCONSOLE.print(settings.offset1);
+//      }
+//      RawCur = int16_t((value * 3300 / adc->adc0->getMaxValue()) - settings.offset1) / (settings.convlow * 0.0000066);
+//
+//      if (abs((int16_t(value * 3300 / adc->adc0->getMaxValue()) - settings.offset1)) <  settings.CurDead)
+//      {
+//        RawCur = 0;
+//      }
+//      if (debugCur != 0)
+//      {
+//        SERIALCONSOLE.print("  ");
+//        SERIALCONSOLE.print(int16_t(value * 3300 / adc->adc0->getMaxValue()) - settings.offset1);
+//        SERIALCONSOLE.print("  ");
+//        SERIALCONSOLE.print(RawCur);
+//        SERIALCONSOLE.print(" mA");
+//        SERIALCONSOLE.print("  ");
+//      }
+//    }
+//    else
+//    {
+//      if (debugCur != 0)
+//      {
+//        SERIALCONSOLE.println();
+//        SERIALCONSOLE.print("High Range: ");
+//        SERIALCONSOLE.print("Value ADC0: ");
+//      }
+//      value = (uint16_t)adc->adc0->analogReadContinuous(); // the unsigned is necessary for 16 bits, otherwise values larger than 3.3/2 V are negative!
+//      if (debugCur != 0)
+//      {
+//        SERIALCONSOLE.print(value * 3300 / adc->adc0->getMaxValue() );//- settings.offset2)
+//        SERIALCONSOLE.print("  ");
+//        SERIALCONSOLE.print(settings.offset2);
+//      }
+//      RawCur = int16_t((value * 3300 / adc->adc0->getMaxValue()) - settings.offset2) / (settings.convhigh *  0.0000066);
+//      if (value < 100 || value > (adc->adc0->getMaxValue() - 100))
+//      {
+//        RawCur = 0;
+//      }
+//      if (debugCur != 0)
+//      {
+//        SERIALCONSOLE.print("  ");
+//        SERIALCONSOLE.print((float(value * 3300 / adc->adc0->getMaxValue()) - settings.offset2));
+//        SERIALCONSOLE.print("  ");
+//        SERIALCONSOLE.print(RawCur);
+//        SERIALCONSOLE.print("mA");
+//        SERIALCONSOLE.print("  ");
+//      }
+//    }
+//  }
 
   if (settings.invertcur == 1)
   {
@@ -1299,7 +1220,7 @@ void updateSOC()
     {
       SOC = map(uint16_t(bms.getAvgCellVolt() * 1000), settings.socvolt[0], settings.socvolt[2], settings.socvolt[1], settings.socvolt[3]);
 
-      ampsecond = (SOC * settings.CAP * settings.Pstrings * 10) / 0.27777777777778 ;
+      ampsecond = ((float)SOC * (float)settings.CAP * (float)settings.Pstrings * 10) / 0.27777777777778 ;
       SOCset = 1;
       if (debug != 0)
       {
@@ -1311,16 +1232,15 @@ void updateSOC()
   if (settings.voltsoc == 1)
   {
     SOC = map(uint16_t(bms.getAvgCellVolt() * 1000), settings.socvolt[0], settings.socvolt[2], settings.socvolt[1], settings.socvolt[3]);
-
-    ampsecond = (SOC * settings.CAP * settings.Pstrings * 10) / 0.27777777777778 ;
+    ampsecond = ((float)SOC * (float)settings.CAP * (float)settings.Pstrings * 10) / 0.27777777777778 ;
   }
-  SOC = ((ampsecond * 0.27777777777778) / (settings.CAP * settings.Pstrings * 1000)) * 100;
+  SOC = ((ampsecond * 0.27777777777778) / ((float)settings.CAP * (float)settings.Pstrings * 1000)) * 100;
+
   if (SOC >= 100)
   {
-    ampsecond = (settings.CAP * settings.Pstrings * 1000) / 0.27777777777778 ; //reset to full, dependant on given capacity. Need to improve with auto correction for capcity.
+    ampsecond = ((float)settings.CAP * (float)settings.Pstrings * 1000) / 0.27777777777778 ; //reset to full, dependant on given capacity. Need to improve with auto correction for capcity.
     SOC = 100;
   }
-
 
   if (SOC < 0)
   {
@@ -1365,12 +1285,12 @@ void SOCcharged(int y)
   if (y == 1)
   {
     SOC = 95;
-    ampsecond = (settings.CAP * settings.Pstrings * 1000) / 0.27777777777778 ; //reset to full, dependant on given capacity. Need to improve with auto correction for capcity.
+    ampsecond = ((float)settings.CAP * (float)settings.Pstrings * 1000) / 0.27777777777778 ; //reset to full, dependant on given capacity. Need to improve with auto correction for capcity.
   }
   if (y == 2)
   {
     SOC = 100;
-    ampsecond = (settings.CAP * settings.Pstrings * 1000) / 0.27777777777778 ; //reset to full, dependant on given capacity. Need to improve with auto correction for capcity.
+    ampsecond = ((float)settings.CAP * (float)settings.Pstrings * 1000) / 0.27777777777778 ; //reset to full, dependant on given capacity. Need to improve with auto correction for capcity.
   }
 }
 
@@ -1380,7 +1300,7 @@ void Prechargecon()
   {
     digitalWrite(OUT4, HIGH);//Negative Contactor Close
     contctrl = 2;
-    if (Pretimer +  settings.Pretime > millis() || currentact > settings.Precurrent)
+    if (Pretimer + settings.Pretime > millis() || currentact > settings.Precurrent)
     {
       digitalWrite(OUT2, HIGH);//precharge
     }
@@ -1518,122 +1438,37 @@ void contcon()
 
 void calcur()
 {
-  adc->adc0->startContinuous(ACUR1);
-  sensor = 1;
-  x = 0;
-  SERIALCONSOLE.print(" Calibrating Current Offset ::::: ");
-  while (x < 20)
-  {
-    settings.offset1 = settings.offset1 + ((uint16_t)adc->adc0->analogReadContinuous() * 3300 / adc->adc0->getMaxValue());
-    SERIALCONSOLE.print(".");
-    delay(100);
-    x++;
-  }
-  settings.offset1 = settings.offset1 / 21;
-  SERIALCONSOLE.print(settings.offset1);
-  SERIALCONSOLE.print(" current offset 1 calibrated ");
-  SERIALCONSOLE.println("  ");
-  x = 0;
-  adc->startContinuous(ACUR2, ADC_0);
-  sensor = 2;
-  SERIALCONSOLE.print(" Calibrating Current Offset ::::: ");
-  while (x < 20)
-  {
-    settings.offset2 = settings.offset2 + ((uint16_t)adc->adc0->analogReadContinuous() * 3300 / adc->adc0->getMaxValue());
-    SERIALCONSOLE.print(".");
-    delay(100);
-    x++;
-  }
-  settings.offset2 = settings.offset2 / 21;
-  SERIALCONSOLE.print(settings.offset2);
-  SERIALCONSOLE.print(" current offset 2 calibrated ");
-  SERIALCONSOLE.println("  ");
+//  adc->adc0->startContinuous(ACUR1);
+//  sensor = 1;
+//  x = 0;
+//  SERIALCONSOLE.print(" Calibrating Current Offset ::::: ");
+//  while (x < 20)
+//  {
+//    settings.offset1 = settings.offset1 + ((uint16_t)adc->adc0->analogReadContinuous() * 3300 / adc->adc0->getMaxValue());
+//    SERIALCONSOLE.print(".");
+//    delay(100);
+//    x++;
+//  }
+//  settings.offset1 = settings.offset1 / 21;
+//  SERIALCONSOLE.print(settings.offset1);
+//  SERIALCONSOLE.print(" current offset 1 calibrated ");
+//  SERIALCONSOLE.println("  ");
+//  x = 0;
+//  adc->startContinuous(ACUR2, ADC_0);
+//  sensor = 2;
+//  SERIALCONSOLE.print(" Calibrating Current Offset ::::: ");
+//  while (x < 20)
+//  {
+//    settings.offset2 = settings.offset2 + ((uint16_t)adc->adc0->analogReadContinuous() * 3300 / adc->adc0->getMaxValue());
+//    SERIALCONSOLE.print(".");
+//    delay(100);
+//    x++;
+//  }
+//  settings.offset2 = settings.offset2 / 21;
+//  SERIALCONSOLE.print(settings.offset2);
+//  SERIALCONSOLE.print(" current offset 2 calibrated ");
+//  SERIALCONSOLE.println("  ");
 }
-void VEcan() //communication with Victron system over CAN
-{
-  msg.id  = 0x351;
-  msg.len = 8;
-  if (storagemode == 0)
-  {
-    msg.buf[0] = lowByte(uint16_t((settings.ChargeVsetpoint * settings.Scells ) * 10));
-    msg.buf[1] = highByte(uint16_t((settings.ChargeVsetpoint * settings.Scells ) * 10));
-  }
-  else
-  {
-    msg.buf[0] = lowByte(uint16_t((settings.StoreVsetpoint * settings.Scells ) * 10));
-    msg.buf[1] = highByte(uint16_t((settings.StoreVsetpoint * settings.Scells ) * 10));
-  }
-  msg.buf[2] = lowByte(chargecurrent);
-  msg.buf[3] = highByte(chargecurrent);
-  msg.buf[4] = lowByte(discurrent );
-  msg.buf[5] = highByte(discurrent);
-  msg.buf[6] = lowByte(uint16_t((settings.DischVsetpoint * settings.Scells) * 10));
-  msg.buf[7] = highByte(uint16_t((settings.DischVsetpoint * settings.Scells) * 10));
-  Can0.write(msg);
-
-  msg.id  = 0x355;
-  msg.len = 8;
-  msg.buf[0] = lowByte(SOC);
-  msg.buf[1] = highByte(SOC);
-  msg.buf[2] = lowByte(SOH);
-  msg.buf[3] = highByte(SOH);
-  msg.buf[4] = lowByte(SOC * 10);
-  msg.buf[5] = highByte(SOC * 10);
-  msg.buf[6] = 0;
-  msg.buf[7] = 0;
-  Can0.write(msg);
-
-  msg.id  = 0x356;
-  msg.len = 8;
-  msg.buf[0] = lowByte(uint16_t(bms.getPackVoltage() * 100));
-  msg.buf[1] = highByte(uint16_t(bms.getPackVoltage() * 100));
-  msg.buf[2] = lowByte(long(currentact / 100));
-  msg.buf[3] = highByte(long(currentact / 100));
-  msg.buf[4] = lowByte(int16_t(bms.getAvgTemperature() * 10));
-  msg.buf[5] = highByte(int16_t(bms.getAvgTemperature() * 10));
-  msg.buf[6] = 0;
-  msg.buf[7] = 0;
-  Can0.write(msg);
-
-  delay(2);
-  msg.id  = 0x35A;
-  msg.len = 8;
-  msg.buf[0] = alarm[0];//High temp  Low Voltage | High Voltage
-  msg.buf[1] = alarm[1]; // High Discharge Current | Low Temperature
-  msg.buf[2] = alarm[2]; //Internal Failure | High Charge current
-  msg.buf[3] = alarm[3];// Cell Imbalance
-  msg.buf[4] = warning[0];//High temp  Low Voltage | High Voltage
-  msg.buf[5] = warning[1];// High Discharge Current | Low Temperature
-  msg.buf[6] = warning[2];//Internal Failure | High Charge current
-  msg.buf[7] = warning[3];// Cell Imbalance
-  Can0.write(msg);
-
-  msg.id  = 0x35E;
-  msg.len = 8;
-  msg.buf[0] = bmsname[0];
-  msg.buf[1] = bmsname[1];
-  msg.buf[2] = bmsname[2];
-  msg.buf[3] = bmsname[3];
-  msg.buf[4] = bmsname[4];
-  msg.buf[5] = bmsname[5];
-  msg.buf[6] = bmsname[6];
-  msg.buf[7] = bmsname[7];
-  Can0.write(msg);
-
-  delay(2);
-  msg.id  = 0x370;
-  msg.len = 8;
-  msg.buf[0] = bmsmanu[0];
-  msg.buf[1] = bmsmanu[1];
-  msg.buf[2] = bmsmanu[2];
-  msg.buf[3] = bmsmanu[3];
-  msg.buf[4] = bmsmanu[4];
-  msg.buf[5] = bmsmanu[5];
-  msg.buf[6] = bmsmanu[6];
-  msg.buf[7] = bmsmanu[7];
-  Can0.write(msg);
-}
-
 
 void BMVmessage()//communication with the Victron Color Control System over VEdirect
 {
@@ -2831,55 +2666,102 @@ void menu()
   }
 }
 
-void canread()
+bool chgCurrRead()
 {
-  Can0.read(inMsg);
-  // Read data: len = data length, buf = data byte(s)
-  switch (inMsg.id)
-  {
-    case 0x3c2:
-      CAB300();
-      break;
+  bool result = false;
 
-    default:
-      break;
-  }
+  // check if data coming
+  if (CAN_MSGAVAIL == CAN1.checkReceive()) {
+    // read data, len: data length, buf: data buf
+    CAN1.readMsgBuf(&inMsg1.len, inMsg1.buf);
+    inMsg1.id = CAN1.getCanId();
 
-  if (inMsg.id >= 0x460 && inMsg.id < 0x480)//do volt magic if ids are ones identified to be modules
-  {
-    //DISABLE debugging otherwise message ids take over window
-    //Serial.println(inMsg.id, HEX);
-    bms.decodecan(inMsg);//do volt magic if ids are ones identified to be modules
-  }
-  if (inMsg.id >= 0x7E0 && inMsg.id < 0x7F0)//do volt magic if ids are ones identified to be modules
-  {
-    bms.decodecan(inMsg);//do volt magic if ids are ones identified to be modules
-  }
-  if (debug == 1)
-  {
-    if (candebug == 1)
+    result = true;
+
+    // Read data: len = data length, buf = data byte(s)
+    switch (inMsg1.id)
     {
-      Serial.print(millis());
-      if ((inMsg.id & 0x80000000) == 0x80000000)    // Determine if ID is standard (11 bits) or extended (29 bits)
-        sprintf(msgString, "Extended ID: 0x%.8lX  DLC: %1d  Data:", (inMsg.id & 0x1FFFFFFF), inMsg.len);
-      else
-        sprintf(msgString, ",0x%.3lX,false,%1d", inMsg.id, inMsg.len);
+      case 40:
+        CANmilliamps = ((long)inMsg1.buf[2]) + ((long)inMsg1.buf[1]<<8) + ((long)inMsg1.buf[0]<<16) - 8388608L;
 
-      Serial.print(msgString);
-
-      if ((inMsg.id & 0x40000000) == 0x40000000) {  // Determine if message is a remote request frame.
-        sprintf(msgString, " REMOTE REQUEST FRAME");
-        Serial.print(msgString);
-      } else {
-        for (byte i = 0; i < inMsg.len; i++) {
-          sprintf(msgString, ", 0x%.2X", inMsg.buf[i]);
-          Serial.print(msgString);
+        if (settings.cursens == Canbus)
+        {
+          RawCur = CANmilliamps;
+          getcurrent();
         }
-      }
-
-      Serial.println();
+        if (candebug == 1)
+        {
+          Serial.println();
+          Serial.print(CANmilliamps);
+          Serial.print("mA ");
+        }
+      break;
     }
   }
+  return result;
+}
+
+bool bmsSlaveRead()
+{
+  bool result = false;
+
+  // check if data coming
+  if (CAN_MSGAVAIL == CAN0.checkReceive()) {
+    // read data, len: data length, buf: data buf
+    CAN0.readMsgBuf(&inMsg.len, inMsg.buf);
+    inMsg.id = CAN0.getCanId();
+
+    result = true;
+
+    // Read data: len = data length, buf = data byte(s)
+    switch (inMsg.id)
+    {
+      case 0x3c2:
+        CAB300();
+        break;
+
+      default:
+        break;
+    }
+
+    if (inMsg.id >= 0x460 && inMsg.id < 0x480)//do volt magic if ids are ones identified to be modules
+    {
+      //DISABLE debugging otherwise message ids take over window
+      //Serial.println(inMsg.id, HEX);
+      bms.decodecan(inMsg);//do volt magic if ids are ones identified to be modules
+    }
+    if (inMsg.id >= 0x7E0 && inMsg.id < 0x7F0)//do volt magic if ids are ones identified to be modules
+    {
+      bms.decodecan(inMsg);//do volt magic if ids are ones identified to be modules
+    }
+    if (debug == 1)
+    {
+      if (candebug == 1)
+      {
+        Serial.print(millis());
+        if ((inMsg.id & 0x80000000) == 0x80000000)    // Determine if ID is standard (11 bits) or extended (29 bits)
+          sprintf(msgString, "Extended ID: 0x%.8lX  DLC: %1d  Data:", (inMsg.id & 0x1FFFFFFF), inMsg.len);
+        else
+          sprintf(msgString, ",0x%.3lX,false,%1d", inMsg.id, inMsg.len);
+
+        Serial.print(msgString);
+
+        if ((inMsg.id & 0x40000000) == 0x40000000) {  // Determine if message is a remote request frame.
+          sprintf(msgString, " REMOTE REQUEST FRAME");
+          Serial.print(msgString);
+        } else {
+          for (byte i = 0; i < inMsg.len; i++) {
+            sprintf(msgString, ", 0x%.2X", inMsg.buf[i]);
+            Serial.print(msgString);
+          }
+        }
+
+        Serial.println();
+      }
+    }
+  }
+
+  return result;
 }
 
 void CAB300()
@@ -2925,7 +2807,6 @@ void currentlimit()
   */
   else
   {
-
     ///Start at no derating///
     discurrent = settings.discurrentmax;
     chargecurrent = settings.chargecurrentmax;
@@ -2954,7 +2835,6 @@ void currentlimit()
     {
       discurrent = 0;
     }
-
 
     //Modifying discharge current///
 
@@ -3088,20 +2968,16 @@ void outputdebug()
 
 void sendcommand()
 {
-  msg.id  = 0x200;
-  msg.len = 3;
-  msg.buf[0] = 0x02;
-  msg.buf[1] = 0x00;
-  msg.buf[2] = 0x00;
-  Can0.write(msg);
+   unsigned char stmp[3] = { 0x02, 0, 0 };
+   CAN0.sendMsgBuf(0x200, CAN_STDID, 3, stmp);
 }
 
 void resetwdog()
 {
-  noInterrupts();                                     //   No - reset WDT
-  WDOG_REFRESH = 0xA602;
-  WDOG_REFRESH = 0xB480;
-  interrupts();
+//  noInterrupts();                                     //   No - reset WDT
+//  WDOG_REFRESH = 0xA602;
+//  WDOG_REFRESH = 0xB480;
+//  interrupts();
 }
 
 void pwmcomms()
@@ -3181,7 +3057,7 @@ void dashupdate()
   Serial2.write(0xff);
   Serial2.write(0xff);
   Serial2.print("soc.val=");
-  Serial2.print(SOC);
+  Serial2.print(SOC); // SOC
   Serial2.write(0xff);  // We always have to send this three lines after each command sent to the nextion display.
   Serial2.write(0xff);
   Serial2.write(0xff);
@@ -3244,6 +3120,8 @@ void dashupdate()
 
 void chargercomms()
 {
+  if (bmsstatus != Charge) { return; }
+  
   if (settings.chargertype == Elcon)
   {
     msg.id  =  0x1806E5F4; //broadcast to all Elteks
@@ -3258,7 +3136,10 @@ void chargercomms()
     msg.buf[6] = 0x00;
     msg.buf[7] = 0x00;
 
-    Can0.write(msg);
+    //Serial.println("Sending command!");
+
+    CAN1.sendMsgBuf(msg.id, CAN_EXTID, msg.len, msg.buf);
+
     msg.ext = 0;
   }
 
@@ -3274,7 +3155,7 @@ void chargercomms()
     msg.buf[5] = lowByte(chargecurrent / ncharger);
     msg.buf[6] = highByte(chargecurrent / ncharger);
 
-    Can0.write(msg);
+    CAN1.sendMsgBuf(msg.id, CAN_STDID, msg.len, msg.buf);
   }
   if (settings.chargertype == BrusaNLG5)
   {
@@ -3307,7 +3188,8 @@ void chargercomms()
     msg.buf[6] = lowByte(chargecurrent / ncharger);
     msg.buf[3] = highByte(uint16_t(((settings.ChargeVsetpoint * settings.Scells ) - chargerendbulk) * 10));
     msg.buf[4] = lowByte(uint16_t(((settings.ChargeVsetpoint * settings.Scells ) - chargerendbulk)  * 10));
-    Can0.write(msg);
+
+    CAN1.sendMsgBuf(msg.id, CAN_STDID, msg.len, msg.buf);
 
     delay(2);
 
@@ -3328,14 +3210,15 @@ void chargercomms()
     msg.buf[4] = lowByte(uint16_t(((settings.ChargeVsetpoint * settings.Scells ) - chargerend) * 10));
     msg.buf[5] = highByte(chargecurrent / ncharger);
     msg.buf[6] = lowByte(chargecurrent / ncharger);
-    Can0.write(msg);
+
+   CAN1.sendMsgBuf(msg.id, CAN_STDID, msg.len, msg.buf);
   }
   if (settings.chargertype == ChevyVolt)
   {
     msg.id  = 0x30E;
     msg.len = 1;
     msg.buf[0] = 0x02; //only HV charging , 0x03 hv and 12V charging
-    Can0.write(msg);
+   // Can0.write(msg);
 
     msg.id  = 0x304;
     msg.len = 4;
@@ -3358,63 +3241,64 @@ void chargercomms()
       msg.buf[2] = highByte( 400);
       msg.buf[3] = lowByte( 400);
     }
-    Can0.write(msg);
+
+    CAN1.sendMsgBuf(msg.id, CAN_STDID, msg.len, msg.buf);
   }
 }
 
 void SerialCanRecieve()
 {
-  if (can.recv(&id, dta))
-  {
-    if (CanDebugSerial == 1)
-    {
-      Serial.print("GET DATA FROM ID: ");
-      Serial.println(id, HEX);
-      for (int i = 0; i < 8; i++)
-      {
-        //Serial.print("0x");
-        Serial.print(dta[i]);
-        Serial.print('\t');
-      }
-      Serial.println();
-    }
-  }
+//  if (can.recv(&id, dta))
+//  {
+//    if (CanDebugSerial == 1)
+//    {
+//      Serial.print("GET DATA FROM ID: ");
+//      Serial.println(id, HEX);
+//      for (int i = 0; i < 8; i++)
+//      {
+//        //Serial.print("0x");
+//        Serial.print(dta[i]);
+//        Serial.print('\t');
+//      }
+//      Serial.println();
+//    }
+//  }
 }
 
 void SetSerialCan(int Speed)
 {
-  switch (Speed)
-  {
-    case 500:
-      if (can.canRate(CAN_RATE_500))
-      {
-        Serial.println("set can rate ok");
-        settings.SerialCanSpeed = 500;
-      }
-      else
-      {
-        Serial.println("set can rate fail");
-      }
-      break;
-
-    case 250:
-      if (can.canRate(CAN_RATE_250))
-      {
-        Serial.println("set can rate ok");
-        settings.SerialCanSpeed = 250;
-      }
-      else
-      {
-        Serial.println("set can rate fail");
-      }
-      break;
-
-    default:
-      Serial.println("Wrong CAN Speed");
-      // if nothing else matches, do the default
-      // default is optional
-      break;
-  }
+//  switch (Speed)
+//  {
+//    case 500:
+//      if (can.canRate(CAN_RATE_500))
+//      {
+//        Serial.println("set can rate ok");
+//        settings.SerialCanSpeed = 500;
+//      }
+//      else
+//      {
+//        Serial.println("set can rate fail");
+//      }
+//      break;
+//
+//    case 250:
+//      if (can.canRate(CAN_RATE_250))
+//      {
+//        Serial.println("set can rate ok");
+//        settings.SerialCanSpeed = 250;
+//      }
+//      else
+//      {
+//        Serial.println("set can rate fail");
+//      }
+//      break;
+//
+//    default:
+//      Serial.println("Wrong CAN Speed");
+//      // if nothing else matches, do the default
+//      // default is optional
+//      break;
+//  }
 }
 
 /*
@@ -3424,47 +3308,47 @@ void SetSerialCan(int Speed)
 
 void SetSerialBaud(uint32_t Speed)
 {
-  Serial.println(Speed);
-  switch (Speed)
-  {
-    case 9600:
-      can.baudRate(0);
-      settings.SerialCanBaud = 9600;
-      canSerial.flush();
-      canSerial.begin(9600);
-      can.exitSettingMode();
-      break;
-
-    case 19200:
-      can.baudRate(1);
-      settings.SerialCanBaud = 19200;
-      canSerial.flush();
-      canSerial.begin(19200);
-      can.exitSettingMode();
-      break;
-
-    case 38400:
-      can.baudRate(2);
-      settings.SerialCanBaud = 38400;
-      canSerial.flush();
-      canSerial.begin(38400);
-      can.exitSettingMode();
-      break;
-
-    case 115200:
-      can.baudRate(4);
-      settings.SerialCanBaud = 115200;
-      canSerial.flush();
-      canSerial.begin(115200);
-      can.exitSettingMode();
-      break;
-
-    default:
-      Serial.println("Wrong Baud Rate");
-      // if nothing else matches, do the default
-      // default is optional
-      break;
-  }
+//  Serial.println(Speed);
+//  switch (Speed)
+//  {
+//    case 9600:
+//      can.baudRate(0);
+//      settings.SerialCanBaud = 9600;
+//      canSerial.flush();
+//      canSerial.begin(9600);
+//      can.exitSettingMode();
+//      break;
+//
+//    case 19200:
+//      can.baudRate(1);
+//      settings.SerialCanBaud = 19200;
+//      canSerial.flush();
+//      canSerial.begin(19200);
+//      can.exitSettingMode();
+//      break;
+//
+//    case 38400:
+//      can.baudRate(2);
+//      settings.SerialCanBaud = 38400;
+//      canSerial.flush();
+//      canSerial.begin(38400);
+//      can.exitSettingMode();
+//      break;
+//
+//    case 115200:
+//      can.baudRate(4);
+//      settings.SerialCanBaud = 115200;
+//      canSerial.flush();
+//      canSerial.begin(115200);
+//      can.exitSettingMode();
+//      break;
+//
+//    default:
+//      Serial.println("Wrong Baud Rate");
+//      // if nothing else matches, do the default
+//      // default is optional
+//      break;
+//  }
 }
 
 void CanSerial() //communication with Victron system over CAN
@@ -3484,7 +3368,7 @@ void CanSerial() //communication with Victron system over CAN
         dta[6] = 0x00;
         dta[7] = 0x00;
 
-        can.send(0x1806E5F4, 1, 0, 8, dta);
+       // can.send(0x1806E5F4, 1, 0, 8, dta);
       }
     }
 
@@ -3500,7 +3384,7 @@ void CanSerial() //communication with Victron system over CAN
         dta[5] = lowByte(chargecurrent / ncharger);
         dta[6] = highByte(chargecurrent / ncharger);
 
-        can.send(0x2FF, 0, 0, 7, dta);
+      //  can.send(0x2FF, 0, 0, 7, dta);
       }
     }
     if (settings.chargertype == BrusaNLG5)
@@ -3533,7 +3417,7 @@ void CanSerial() //communication with Victron system over CAN
         dta[6] = lowByte(chargecurrent / ncharger);
         dta[3] = highByte(uint16_t(((settings.ChargeVsetpoint * settings.Scells ) - chargerendbulk) * 10));
         dta[4] = lowByte(uint16_t(((settings.ChargeVsetpoint * settings.Scells ) - chargerendbulk)  * 10));
-        can.send(chargerid1, 0, 0, 7, dta);
+       // can.send(chargerid1, 0, 0, 7, dta);
       }
       if (mescycl == 1)
       {
@@ -3553,7 +3437,7 @@ void CanSerial() //communication with Victron system over CAN
         dta[4] = lowByte(uint16_t(((settings.ChargeVsetpoint * settings.Scells ) - chargerend) * 10));
         dta[5] = highByte(chargecurrent / ncharger);
         dta[6] = lowByte(chargecurrent / ncharger);
-        can.send(chargerid2, 0, 0, 7, dta);
+       // can.send(chargerid2, 0, 0, 7, dta);
       }
     }
 
@@ -3565,7 +3449,7 @@ void CanSerial() //communication with Victron system over CAN
         dta[1] = 0x00;
         dta[2] = 0x00;
         dta[3] = 0x00;
-        can.send(0x30E, 0, 0, 4, dta);
+       // can.send(0x30E, 0, 0, 4, dta);
       }
       if (mescycl == 1)
       {
@@ -3588,7 +3472,7 @@ void CanSerial() //communication with Victron system over CAN
           dta[2] = highByte( 400);
           dta[3] = lowByte( 400);
         }
-        can.send(0x304, 0, 0, 4, dta);
+//        can.send(0x304, 0, 0, 4, dta);
       }
     }
 
@@ -3623,7 +3507,8 @@ void CanSerial() //communication with Victron system over CAN
         msg.buf[6] = 0x96;
       }
       msg.buf[7] = 0x01; //HV charging
-      Can0.write(msg);
+
+      CAN1.sendMsgBuf(msg.id, CAN_STDID, msg.len, msg.buf);
     }
   }
 
@@ -3634,7 +3519,7 @@ void CanSerial() //communication with Victron system over CAN
       dta[0] = 0xA0;
       dta[1] = settings.DCDCreq * 1.27;
 
-      can.send(0x1D4, 0, 0, 2, dta);
+    //  can.send(0x1D4, 0, 0, 2, dta);
     }
   }
   mescycl++;

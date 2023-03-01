@@ -36,7 +36,7 @@
 
 #define MAX_MODULE_ADDR     0x10
 
-#define EEPROM_VERSION      0x12    //update any time EEPROM struct below is changed.
+#define EEPROM_VERSION      0x13    //update any time EEPROM struct below is changed.
 #define EEPROM_PAGE         0
 
 typedef struct {
@@ -96,3 +96,12 @@ typedef struct {
   uint32_t SerialCanBaud;
   uint8_t DCDCreq;
 } EEPROMSettings;
+
+
+// Pulled from FlexCAN library
+typedef struct CAN_message_t {
+  unsigned long id;      // can identifier
+  int ext;
+  uint8_t len; // length of data
+  uint8_t buf[8];
+} CAN_message_t;

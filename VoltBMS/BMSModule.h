@@ -39,9 +39,9 @@ public:
   int getCellsUsed();
 
 private:
-  float cellVolt[12]; // calculated as 16 bit value * 6.250 / 16383 = volts
- // float lowestCellVolt[33];
- // float highestCellVolt[33];
+  float cellVolt[33]; // calculated as 16 bit value * 6.250 / 16383 = volts
+  float lowestCellVolt[33];
+  float highestCellVolt[33];
   float moduleVolt;      // calculated as 16 bit value * 33.333 / 16383 = volts
   float temperatures[5]; // Don't know the proper scaling at this point
   float lowestTemperature;
