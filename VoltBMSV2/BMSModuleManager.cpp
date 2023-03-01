@@ -138,18 +138,18 @@ void BMSModuleManager::balanceCells()
   msg.id = 0x300;
   msg.len = 8;
 
-
-  SERIALCONSOLE.print("   DEBUG Balance - ID:    ");
-  SERIALCONSOLE.print(msg.id, HEX);
-  SERIALCONSOLE.println("    ");
-  for (byte i = 0; i < msg.len; i++)
-  {
-    SERIALCONSOLE.print("    pos: ");
-    Serial.print(i);
-    Serial.print("  -  ");
-    SERIALCONSOLE.print(msg.buf[i], BIN);
-    SERIALCONSOLE.println(' ');
-  }
+//
+//  SERIALCONSOLE.print("   DEBUG Balance - ID:    ");
+//  SERIALCONSOLE.print(msg.id, HEX);
+//  SERIALCONSOLE.println("    ");
+//  for (byte i = 0; i < msg.len; i++)
+//  {
+//    SERIALCONSOLE.print("    pos: ");
+//    Serial.print(i);
+//    Serial.print("  -  ");
+//    SERIALCONSOLE.print(msg.buf[i], BIN);
+//    SERIALCONSOLE.println(' ');
+//  }
 
   can->sendMsgBuf(msg.id, CAN_STDID, msg.len, msg.buf);
 
@@ -183,17 +183,17 @@ void BMSModuleManager::balanceCells()
   msg.len = 5;
 
 
-  SERIALCONSOLE.print("   DEBUG Balance - ID:    ");
-  SERIALCONSOLE.print(msg.id, HEX);
-  SERIALCONSOLE.println("    ");
-  for (byte i = 0; i < msg.len; i++)
-  {
-    SERIALCONSOLE.print("    pos: ");
-    Serial.print(i);
-    Serial.print("  -  ");
-    SERIALCONSOLE.print(msg.buf[i], BIN);
-    SERIALCONSOLE.println(' ');
-  }
+//  SERIALCONSOLE.print("   DEBUG Balance - ID:    ");
+//  SERIALCONSOLE.print(msg.id, HEX);
+//  SERIALCONSOLE.println("    ");
+//  for (byte i = 0; i < msg.len; i++)
+//  {
+//    SERIALCONSOLE.print("    pos: ");
+//    Serial.print(i);
+//    Serial.print("  -  ");
+//    SERIALCONSOLE.print(msg.buf[i], BIN);
+//    SERIALCONSOLE.println(' ');
+//  }
 
   can->sendMsgBuf(msg.id, CAN_STDID, msg.len, msg.buf);
 }

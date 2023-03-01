@@ -100,7 +100,7 @@ typedef struct {
 
 // Pulled from FlexCAN library
 typedef struct CAN_message_t {
-  int id;      // can identifier
+  unsigned long id;      // can identifier
   int ext;
   uint8_t len; // length of data
   uint8_t buf[8];

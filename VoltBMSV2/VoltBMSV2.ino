@@ -212,7 +212,7 @@ void loadSettings()
   settings.StoreVsetpoint = 3.8; // V storage mode charge max
   settings.discurrentmax = 300; // max discharge current in 0.1A
   settings.DisTaper = 0.3f; //V offset to bring in discharge taper to Zero Amps at settings.DischVsetpoint
-  settings.chargecurrentmax = 300; //max charge current in 0.1A
+  settings.chargecurrentmax = 100; //max charge current in 0.1A
   settings.chargecurrentend = 50; //end charge current in 0.1A
   settings.socvolt[0] = 3100; //Voltage and SOC curve for voltage based SOC calc
   settings.socvolt[1] = 10; //Voltage and SOC curve for voltage based SOC calc
@@ -253,7 +253,7 @@ uint32_t lastUpdate;
 
 void setup()
 {
-  delay(4000);  //just for easy debugging. It takes a few seconds for USB to come up properly on most OS's
+  // delay(4000);  //just for easy debugging. It takes a few seconds for USB to come up properly on most OS's
 
   pinMode(IN1, INPUT);  // KEY ON
   digitalWrite(IN1, LOW); // Disable pull up
@@ -3120,6 +3120,8 @@ void dashupdate()
 
 void chargercomms()
 {
+  if (bmsstatus != Charge) { return; }
+  
   if (settings.chargertype == Elcon)
   {
     msg.id  =  0x1806E5F4; //broadcast to all Elteks
@@ -3134,7 +3136,9 @@ void chargercomms()
     msg.buf[6] = 0x00;
     msg.buf[7] = 0x00;
 
-    CAN1.sendMsgBuf(msg.id, CAN_STDID, msg.len, msg.buf);
+    //Serial.println("Sending command!");
+
+    CAN1.sendMsgBuf(msg.id, CAN_EXTID, msg.len, msg.buf);
 
     msg.ext = 0;
   }
